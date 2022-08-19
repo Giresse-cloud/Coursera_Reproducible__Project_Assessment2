@@ -1,0 +1,167 @@
+---
+title: 'Reproducible Research: Peer Assessment 2'
+author: "Giresse"
+date: '2022-08-19'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(ggplot2)
+
+```
+
+## Impact of Severe Weather Events on Public Health and Economy in the United States
+
+## 1. Data Processing
+
+Download the data and unzip
+
+```{r}
+setwd("D:/Data Science/Git projet/Coursera_Reproducible__Project_Assessment2")
+
+download.file("http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", destfile = "stormData.csv.bz2")
+  
+unzip("stormData.zip")
+
+```
+
+## 2. Read the generated csv file and inspect data
+```{r}
+#Read data
+my_data <- read.csv("stormData/stormData.csv", header = TRUE, sep = ",")
+
+#Inspecting data
+dim(my_data)
+head(my_data)
+
+
+```
+
+## 3. Subsetting the columns 
+
+Select health and economic impacts columns
+
+- EVTYPE
+- FATALITIES
+- INJURIES
+- PROPDMG
+- PROPDMGEXP
+- CROPDMG
+- CROPDMGEXP
+
+```{r}
+#Creating vecteur with columns names
+columns_data <- c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")
+
+#Selecting data
+
+my_data <- my_data[, columns_data]
+
+head(my_data)
+
+```
+
+Select fatalities, injuries, or damages occured
+
+```{r}
+
+my_data <- as.data.table(my_data)
+
+#Select data only where the fatalities, injuries, or damages occured
+my_data <- my_data[
+  (EVTYPE != "?" & (INJURIES > 0 | FATALITIES > 0 | PROPDMG > 0 | CROPDMG > 0)), 
+             c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")
+]
+
+```
+
+## 4. Converting columns PROPDMGEXP and CROPDMGEXP
+
+Must convert the exponent values from K, M, B to 1000, 1000000, and 1000000000
+
+```{r}
+sel_columns <- c("PROPDMGEXP", "CROPDMGEXP")
+my_data[,  (sel_columns) := c(lapply(.SD, toupper)), .SDcols = sel_columns]
+
+PROPDMGKey <-  c("\"\"" = 10^0, 
+                 "-" = 10^0, "+" = 10^0, "0" = 10^0, "1" = 10^1, "2" = 10^2, "3" = 10^3,
+                 "4" = 10^4, "5" = 10^5, "6" = 10^6, "7" = 10^7, "8" = 10^8, "9" = 10^9, 
+                 "H" = 10^2, "K" = 10^3, "M" = 10^6, "B" = 10^9)
+CROPDMGKey <-  c("\"\"" = 10^0, "?" = 10^0, "0" = 10^0, "K" = 10^3, "M" = 10^6, "B" = 10^9)
+
+my_data[, PROPDMGEXP := PROPDMGKey[as.character(my_data[,PROPDMGEXP])]]
+my_data[is.na(PROPDMGEXP), PROPDMGEXP := 10^0 ]
+
+my_data[, CROPDMGEXP := CROPDMGKey[as.character(my_data[,CROPDMGEXP])] ]
+my_data[is.na(CROPDMGEXP), CROPDMGEXP := 10^0 ]
+
+```
+
+## 5. Creating columns of Property Cost and Crop Cost and Combining the coefficient (mantissa) and exponent
+
+```{r}
+my_data <- my_data[, .(EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, PROPCOST = PROPDMG * PROPDMGEXP, CROPDMG, CROPDMGEXP, CROPCOST = CROPDMG * CROPDMGEXP)]
+
+```
+
+## Estimating the total of Fatalities and Injuries (Health Impacts)
+
+```{r}
+fatal_inj_data <- my_data[, .(Fatalities = sum(FATALITIES), Injuries = sum(INJURIES), Total= sum(FATALITIES) + sum(INJURIES)), by = .(EVTYPE)]
+
+fatal_inj_data <- fatal_inj_data[order(-Total), ]
+
+fatal_inj_data <- fatal_inj_data[1:10, ]
+
+head(fatal_inj_data)
+
+```
+
+##Estimating the total of Property Cost and Crop Cost (Economic Impacts)
+
+```{r}
+eco_impact <- my_data[, .(Propcost_sum = sum(PROPCOST), cropcost_sum = sum(CROPCOST), Total = sum(PROPCOST) + sum(CROPCOST)), by = .(EVTYPE)]
+
+eco_impact <- eco_impact[order(-Total), ]
+
+eco_impact <- eco_impact[1:10, ]
+
+head(eco_impact)
+
+```
+
+## Answering Questions
+1. Across the United States, which types of events are most harmful with respect to population health?
+2. Across the United States, which types of events have the greatest economic consequences?
+
+# Question 1 : Events that are most harmful with respect to population health accross United States by generating histogram of the most harmful weather for US population.
+
+```{r}
+harmful_events <- melt(fatal_inj_data, id.vars = "EVTYPE", variable.name = "Health_Consequences")
+
+ggplot(harmful_events, aes(x = reorder(EVTYPE, -value), y = value)) + 
+  geom_bar(stat = "identity", aes(fill = Health_Consequences), position = "dodge") + 
+  ylab("Total Fatalities or injuries events") + 
+  xlab("Weather events") + 
+  theme(axis.text.x = element_text(angle=45, hjust=1)) + 
+  ggtitle("The most harmful events for population accross United States") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+# Question 2 : Events with the greatest economic consequences
+
+```{r}
+Eco_cons_data <- melt(eco_impact, id.vars = "EVTYPE", variable.name = "Consequences")
+
+ggplot(Eco_cons_data, aes(x = reorder(EVTYPE, -value), y = value/1e9)) + 
+  geom_bar(stat = "identity", aes(fill = Consequences), position = "dodge") + 
+  ylab("Cost n billion USD") + 
+  xlab("Weather Events") + 
+  theme(axis.text.x = element_text(angle=45, hjust=1)) + 
+  ggtitle("Events with the Greatest Economic consequences") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
